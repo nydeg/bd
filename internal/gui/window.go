@@ -51,9 +51,13 @@ func (a *App) createToolbar() fyne.CanvasObject {
     deleteButton := widget.NewButton("🗑️ Удалить", a.showDeleteDialog)
     searchButton := widget.NewButton("🔍 Поиск", a.showSearchDialog)
     refreshButton := widget.NewButton("🔄 Обновить", a.refreshTable)
+
+    importTxtButton := widget.NewButton("📥 Импорт TXT", a.showImportDialog)
+    exportTxtButton := widget.NewButton("📤 Экспорт TXT", a.showExportDialog)
     
-    importButton := widget.NewButton("📥 Импорт TXT", a.showImportDialog)
-    exportButton := widget.NewButton("📤 Экспорт TXT", a.showExportDialog)
+    importExcelButton := widget.NewButton("📊 Импорт Excel", a.showImportExcelDialog)
+    exportExcelButton := widget.NewButton("📈 Экспорт Excel", a.showExportExcelDialog)
+    
     clearButton := widget.NewButton("🗑️ Очистить БД", a.showClearDatabaseDialog)
     statsButton := widget.NewButton("📊 Статистика", a.showStatsDialog)
     
@@ -62,7 +66,11 @@ func (a *App) createToolbar() fyne.CanvasObject {
         widget.NewSeparator(),
         refreshButton, 
         widget.NewSeparator(),
-        importButton, exportButton, clearButton, statsButton,
+        importTxtButton, exportTxtButton,
+        widget.NewSeparator(),
+        importExcelButton, exportExcelButton,
+        widget.NewSeparator(),
+        clearButton, statsButton,
     )
     
     return toolbar

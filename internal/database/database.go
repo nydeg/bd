@@ -8,7 +8,7 @@ import (
     "strconv"
     "strings"
 
-
+    "github.com/xuri/excelize/v2"
     // "unicode/utf8"
 )
 
@@ -26,6 +26,7 @@ type Database struct {
     freeList []int64
 }
 
+// O(n) просто считываем весь файл, зная расположение нужных нам полей
 func OpenDatabase(filePath string) (*Database, error) {
     os.MkdirAll("data", 0755)
     
@@ -37,7 +38,7 @@ func OpenDatabase(filePath string) (*Database, error) {
     db := &Database{
         file:       file,
         filePath:   filePath,
-        recordSize: 152,
+        recordSize: 152, // байтики сложил просто
         idIndex:    make(map[int32]int64),
         titleIndex: make(map[string][]int64),
         authorIndex: make(map[string][]int64),
@@ -53,6 +54,7 @@ func OpenDatabase(filePath string) (*Database, error) {
     return db, nil
 }
 
+// O(1)
 func (db *Database) Close() error {
     if db.file != nil {
         return db.file.Close()
@@ -60,6 +62,7 @@ func (db *Database) Close() error {
     return nil
 }
 
+// O(1), константы небольшие
 func (db *Database) ClearDatabase() error {
     if err := db.file.Truncate(0); err != nil {
         return fmt.Errorf("ошибка очистки файла: %v", err)
@@ -78,9 +81,11 @@ func (db *Database) ClearDatabase() error {
     return nil
 }
 
+// O(nlogn)
 func (db *Database) GetAllBooks() ([]BookView, error) {
     var views []BookView
-    
+
+    // проходимся по n позициям, но достаем за O(1) (суммарно O(n))
     for _, position := range db.idIndex {
         book, err := db.readRecord(position)
         if err != nil {
@@ -89,6 +94,7 @@ func (db *Database) GetAllBooks() ([]BookView, error) {
         views = append(views, book.ToView())
     }
     
+    // сортирую id => O(nlogn)
     sort.Slice(views, func(i, j int) bool {
         return views[i].ID < views[j].ID
     })
@@ -96,9 +102,11 @@ func (db *Database) GetAllBooks() ([]BookView, error) {
     return views, nil
 }
 
+// O(1)
 func (db *Database) AddBook(bookView BookView) error {
     book := bookView.ToBook()
     
+    // благодаря мапам все быренько (проверяем на существование по айди в мапе, потом запись в мапу и обновление индексов)
     if _, exists := db.idIndex[book.ID]; exists {
         return fmt.Errorf("книга с ID %d уже существует", book.ID)
     }
@@ -122,6 +130,7 @@ func (db *Database) AddBook(bookView BookView) error {
     db.updateIndexes(book, position)
     return nil
 }
+
 
 func (db *Database) UpdateBook(bookView BookView) error {
     position, exists := db.idIndex[bookView.ID]
@@ -461,4 +470,131 @@ func (db *Database) removeFromSliceIndexInt(index map[int32][]int64, key int32, 
     if len(index[key]) == 0 {
         delete(index, key)
     }
+}
+
+func (db *Database) ExportToExcel(filename string) error {
+    books, err := db.GetAllBooks()
+    if err != nil {
+        return fmt.Errorf("ошибка получения книг: %v", err)
+    }
+
+    f := excelize.NewFile()
+    defer f.Close()
+
+    // Создаем новый лист
+    index, err := f.NewSheet("Книги")
+    if err != nil {
+        return fmt.Errorf("ошибка создания листа: %v", err)
+    }
+
+    // Устанавливаем заголовки
+    headers := []string{"ID", "Название", "Автор", "Год издания", "Тираж"}
+    for i, h := range headers {
+        cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+        f.SetCellValue("Книги", cell, h)
+        
+        // Устанавливаем стиль для заголовков
+        style, _ := f.NewStyle(&excelize.Style{
+            Font: &excelize.Font{Bold: true},
+            Fill: excelize.Fill{Type: "pattern", Color: []string{"#DDEBF7"}, Pattern: 1},
+        })
+        f.SetCellStyle("Книги", cell, cell, style)
+    }
+
+    // Заполняем данные
+    for i, book := range books {
+        row := i + 2
+        f.SetCellValue("Книги", "A"+strconv.Itoa(row), book.ID)
+        f.SetCellValue("Книги", "B"+strconv.Itoa(row), book.Title)
+        f.SetCellValue("Книги", "C"+strconv.Itoa(row), book.Author)
+        f.SetCellValue("Книги", "D"+strconv.Itoa(row), book.Year)
+        f.SetCellValue("Книги", "E"+strconv.Itoa(row), book.Copies)
+    }
+
+    // Автоматическая ширина колонок
+    f.SetColWidth("Книги", "A", "A", 10)
+    f.SetColWidth("Книги", "B", "B", 40)
+    f.SetColWidth("Книги", "C", "C", 25)
+    f.SetColWidth("Книги", "D", "D", 12)
+    f.SetColWidth("Книги", "E", "E", 12)
+
+    // Устанавливаем активный лист
+    f.SetActiveSheet(index)
+
+    // Удаляем дефолтный лист
+    f.DeleteSheet("Sheet1")
+
+    // Сохраняем файл
+    if err := f.SaveAs(filename); err != nil {
+        return fmt.Errorf("ошибка сохранения файла: %v", err)
+    }
+
+    return nil
+}
+
+// ImportFromExcel импортирует книги из Excel файла
+func (db *Database) ImportFromExcel(filename string) (int, error) {
+    f, err := excelize.OpenFile(filename)
+    if err != nil {
+        return 0, fmt.Errorf("ошибка открытия файла: %v", err)
+    }
+    defer f.Close()
+
+    // Получаем строки из листа "Книги"
+    rows, err := f.GetRows("Книги")
+    if err != nil {
+        return 0, fmt.Errorf("ошибка чтения листа: %v", err)
+    }
+
+    if len(rows) < 2 {
+        return 0, fmt.Errorf("файл не содержит данных")
+    }
+
+    importedCount := 0
+
+    // Проходим по строкам, начиная со второй (первая - заголовки)
+    for i, row := range rows[1:] {
+        // Пропускаем пустые строки
+        if len(row) < 5 {
+            continue
+        }
+
+        // Парсим ID
+        id, err := strconv.Atoi(row[0])
+        if err != nil {
+            return importedCount, fmt.Errorf("ошибка в строке %d: неверный ID", i+2)
+        }
+
+        // Парсим год
+        year, err := strconv.Atoi(row[3])
+        if err != nil {
+            return importedCount, fmt.Errorf("ошибка в строке %d: неверный год", i+2)
+        }
+
+        // Парсим тираж
+        copies, err := strconv.Atoi(row[4])
+        if err != nil {
+            return importedCount, fmt.Errorf("ошибка в строке %d: неверный тираж", i+2)
+        }
+
+        book := BookView{
+            ID:     int32(id),
+            Title:  row[1],
+            Author: row[2],
+            Year:   int32(year),
+            Copies: int32(copies),
+        }
+
+        // Пытаемся добавить книгу
+        if err := db.AddBook(book); err != nil {
+            // Если книга с таким ID уже существует, обновляем её
+            if err := db.UpdateBook(book); err != nil {
+                return importedCount, fmt.Errorf("ошибка обновления книги в строке %d: %v", i+2, err)
+            }
+        }
+
+        importedCount++
+    }
+
+    return importedCount, nil
 }

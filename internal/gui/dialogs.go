@@ -436,7 +436,7 @@ func (a *App) showSearchDialog() {
     )
 
     scrollContainer := container.NewScroll(searchContent)
-    scrollContainer.SetMinSize(fyne.NewSize(900, 600)) // Увеличиваем размер окна поиска
+    scrollContainer.SetMinSize(fyne.NewSize(900, 600))
 
     closeButton := widget.NewButton("Закрыть", func() {})
     
@@ -532,3 +532,59 @@ func (a *App) showStatsDialog() {
 
     dialog.ShowInformation("Статистика", statsText, a.window)
 }
+
+func (a *App) showExportExcelDialog() {
+    fileDialog := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+        if err != nil {
+            dialog.ShowError(err, a.window)
+            return
+        }
+        if writer == nil {
+            return
+        }
+        defer writer.Close()
+
+        if err := a.database.ExportToExcel(writer.URI().Path()); err != nil {
+            dialog.ShowError(fmt.Errorf("ошибка экспорта: %v", err), a.window)
+        } else {
+            dialog.ShowInformation("Успех", "Данные успешно экспортированы в Excel", a.window)
+        }
+    }, a.window)
+
+    fileDialog.SetFileName("books_export.xlsx")
+    fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".xlsx"}))
+    fileDialog.Show()
+}
+
+func (a *App) showImportExcelDialog() {
+    fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+        if err != nil {
+            dialog.ShowError(err, a.window)
+            return
+        }
+        if reader == nil {
+            return
+        }
+        defer reader.Close()
+
+        confirmDialog := dialog.NewConfirm("Импорт данных из Excel", 
+            "Внимание! При импорте:\n- Новые книги будут добавлены\n- Существующие книги с одинаковым ID будут обновлены\n\nПродолжить?",
+            func(confirmed bool) {
+                if confirmed {
+                    count, err := a.database.ImportFromExcel(reader.URI().Path())
+                    if err != nil {
+                        dialog.ShowError(fmt.Errorf("ошибка импорта: %v", err), a.window)
+                    } else {
+                        dialog.ShowInformation("Успех", 
+                            fmt.Sprintf("Импорт завершен!\nДобавлено/обновлено книг: %d", count), a.window)
+                        a.refreshTable()
+                    }
+                }
+            }, a.window)
+        confirmDialog.Show()
+    }, a.window)
+
+    fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".xlsx"}))
+    fileDialog.Show()
+}
+

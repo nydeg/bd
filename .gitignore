@@ -1,2 +1,4 @@
 *.db
+test.go
 books_export.txt
+books_export.xlsx
