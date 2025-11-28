@@ -102,11 +102,12 @@ func (db *Database) GetAllBooks() ([]BookView, error) {
     return views, nil
 }
 
-// O(1)
+// O(1) в среднем
 func (db *Database) AddBook(bookView BookView) error {
     book := bookView.ToBook()
     
     // благодаря мапам все быренько (проверяем на существование по айди в мапе, потом запись в мапу и обновление индексов)
+    // Но, в случае коллизий О(n)
     if _, exists := db.idIndex[book.ID]; exists {
         return fmt.Errorf("книга с ID %d уже существует", book.ID)
     }
@@ -131,30 +132,36 @@ func (db *Database) AddBook(bookView BookView) error {
     return nil
 }
 
-
+// O(1)в среднем, но из-за коллизий худший - O(n)
 func (db *Database) UpdateBook(bookView BookView) error {
     position, exists := db.idIndex[bookView.ID]
     if !exists {
         return fmt.Errorf("книга с ID %d не найдена", bookView.ID)
     }
     
+    // O(1)
     oldBook, err := db.readRecord(position)
     if err != nil {
         return err
     }
     
+    // O(1) в среднем
     db.removeFromIndexes(oldBook, position)
     
     newBook := bookView.ToBook()
+    // O(1)
     if err := db.writeRecord(newBook, position); err != nil {
         return err
     }
     
+    // O(1) в среднем
     db.updateIndexes(newBook, position)
     return nil
 }
 
+// O(1) в среднем, O(n) - худший
 func (db *Database) DeleteBook(id int32) error {
+    // в худшем O(n), среднее O(1)
     position, exists := db.idIndex[id]
     if !exists {
         return fmt.Errorf("книга с ID %d не найдена", id)
@@ -170,6 +177,7 @@ func (db *Database) DeleteBook(id int32) error {
     return nil
 }
 
+// есть все ключи в одной корзине O(n), O(1) в среднем
 func (db *Database) FindByID(id int32) (*Book, error) {
     position, exists := db.idIndex[id]
     if !exists {
@@ -178,7 +186,12 @@ func (db *Database) FindByID(id int32) (*Book, error) {
     return db.readRecord(position)
 }
 
+// O(n * m) (n - количество книг, m - длина поля)
+// можно по идее оптимизировать если быстрее сранивать строки, но 
+// проблема строковых полей в этом проекте в принципе в том, что
+// не используются деревья и поиск не оптимизирован
 func (db *Database) FindBooks(field, value string) ([]BookView, error) {
+    // O(nlogn)
     allBooks, err := db.GetAllBooks()
     if err != nil {
         return nil, err
@@ -199,12 +212,14 @@ func (db *Database) FindBooks(field, value string) ([]BookView, error) {
             }
             
         case "Название":
+            // O(m)
             bookTitle := strings.ToLower(book.Title)
             if strings.Contains(bookTitle, searchValue) {
                 match = true
             }
             
         case "Автор":
+            // O(m)
             bookAuthor := strings.ToLower(book.Author)
             if strings.Contains(bookAuthor, searchValue) {
                 match = true
@@ -235,6 +250,7 @@ func (db *Database) FindBooks(field, value string) ([]BookView, error) {
     return result, nil
 }
 
+// O(n)
 func (db *Database) ExportToTxt(filename string) error {
     books, err := db.GetAllBooks()
     if err != nil {
@@ -269,6 +285,7 @@ func (db *Database) ExportToTxt(filename string) error {
     return nil
 }
 
+// из-за сортировки O(nlogn), а вообще считывание все так же O(n)
 func (db *Database) ImportFromTxt(filename string) (int, error) {
     file, err := os.Open(filename)
     if err != nil {
@@ -364,6 +381,7 @@ func BytesToString(data []byte) string {
     return bytesToString(data)
 }
 
+// O(1)
 func (db *Database) readRecord(position int64) (*Book, error) {
     if _, err := db.file.Seek(position, 0); err != nil {
         return nil, err
@@ -381,6 +399,7 @@ func (db *Database) readRecord(position int64) (*Book, error) {
     return bytesToBook(buffer), nil
 }
 
+// O(1)
 func (db *Database) writeRecord(book *Book, position int64) error {
     if _, err := db.file.Seek(position, 0); err != nil {
         return err
@@ -391,6 +410,7 @@ func (db *Database) writeRecord(book *Book, position int64) error {
     return err
 }
 
+// O(n)
 func (db *Database) rebuildIndexes() error {
     stat, err := db.file.Stat()
     if err != nil {
@@ -422,6 +442,7 @@ func (db *Database) rebuildIndexes() error {
     return nil
 }
 
+// O(n) - коллизии, O(1) средний
 func (db *Database) updateIndexes(book *Book, position int64) {
     db.idIndex[book.ID] = position
     
@@ -434,6 +455,7 @@ func (db *Database) updateIndexes(book *Book, position int64) {
     db.yearIndex[book.Year] = append(db.yearIndex[book.Year], position)
 }
 
+// O(n) - коллизии, O(1) средний
 func (db *Database) removeFromIndexes(book *Book, position int64) {
     delete(db.idIndex, book.ID)
     
@@ -446,6 +468,7 @@ func (db *Database) removeFromIndexes(book *Book, position int64) {
     db.removeFromSliceIndexInt(db.yearIndex, book.Year, position)
 }
 
+// k - количество записей по ключу, O(k) средний
 func (db *Database) removeFromSliceIndex(index map[string][]int64, key string, position int64) {
     positions := index[key]
     for i, pos := range positions {
@@ -459,6 +482,7 @@ func (db *Database) removeFromSliceIndex(index map[string][]int64, key string, p
     }
 }
 
+// O(k) - средний
 func (db *Database) removeFromSliceIndexInt(index map[int32][]int64, key int32, position int64) {
     positions := index[key]
     for i, pos := range positions {
@@ -472,6 +496,7 @@ func (db *Database) removeFromSliceIndexInt(index map[int32][]int64, key int32, 
     }
 }
 
+// O(n)
 func (db *Database) ExportToExcel(filename string) error {
     books, err := db.GetAllBooks()
     if err != nil {
@@ -481,27 +506,23 @@ func (db *Database) ExportToExcel(filename string) error {
     f := excelize.NewFile()
     defer f.Close()
 
-    // Создаем новый лист
     index, err := f.NewSheet("Книги")
     if err != nil {
         return fmt.Errorf("ошибка создания листа: %v", err)
     }
 
-    // Устанавливаем заголовки
     headers := []string{"ID", "Название", "Автор", "Год издания", "Тираж"}
     for i, h := range headers {
         cell, _ := excelize.CoordinatesToCellName(i+1, 1)
         f.SetCellValue("Книги", cell, h)
         
-        // Устанавливаем стиль для заголовков
         style, _ := f.NewStyle(&excelize.Style{
             Font: &excelize.Font{Bold: true},
-            Fill: excelize.Fill{Type: "pattern", Color: []string{"#DDEBF7"}, Pattern: 1},
+            Fill: excelize.Fill{Type: "pattern", Color: []string{"#f5f7ddff"}, Pattern: 1},
         })
         f.SetCellStyle("Книги", cell, cell, style)
     }
 
-    // Заполняем данные
     for i, book := range books {
         row := i + 2
         f.SetCellValue("Книги", "A"+strconv.Itoa(row), book.ID)
@@ -511,20 +532,16 @@ func (db *Database) ExportToExcel(filename string) error {
         f.SetCellValue("Книги", "E"+strconv.Itoa(row), book.Copies)
     }
 
-    // Автоматическая ширина колонок
     f.SetColWidth("Книги", "A", "A", 10)
     f.SetColWidth("Книги", "B", "B", 40)
     f.SetColWidth("Книги", "C", "C", 25)
     f.SetColWidth("Книги", "D", "D", 12)
     f.SetColWidth("Книги", "E", "E", 12)
 
-    // Устанавливаем активный лист
     f.SetActiveSheet(index)
 
-    // Удаляем дефолтный лист
     f.DeleteSheet("Sheet1")
 
-    // Сохраняем файл
     if err := f.SaveAs(filename); err != nil {
         return fmt.Errorf("ошибка сохранения файла: %v", err)
     }
@@ -532,7 +549,7 @@ func (db *Database) ExportToExcel(filename string) error {
     return nil
 }
 
-// ImportFromExcel импортирует книги из Excel файла
+// O(n)
 func (db *Database) ImportFromExcel(filename string) (int, error) {
     f, err := excelize.OpenFile(filename)
     if err != nil {
@@ -540,7 +557,6 @@ func (db *Database) ImportFromExcel(filename string) (int, error) {
     }
     defer f.Close()
 
-    // Получаем строки из листа "Книги"
     rows, err := f.GetRows("Книги")
     if err != nil {
         return 0, fmt.Errorf("ошибка чтения листа: %v", err)
@@ -552,26 +568,22 @@ func (db *Database) ImportFromExcel(filename string) (int, error) {
 
     importedCount := 0
 
-    // Проходим по строкам, начиная со второй (первая - заголовки)
     for i, row := range rows[1:] {
         // Пропускаем пустые строки
         if len(row) < 5 {
             continue
         }
 
-        // Парсим ID
         id, err := strconv.Atoi(row[0])
         if err != nil {
             return importedCount, fmt.Errorf("ошибка в строке %d: неверный ID", i+2)
         }
 
-        // Парсим год
         year, err := strconv.Atoi(row[3])
         if err != nil {
             return importedCount, fmt.Errorf("ошибка в строке %d: неверный год", i+2)
         }
 
-        // Парсим тираж
         copies, err := strconv.Atoi(row[4])
         if err != nil {
             return importedCount, fmt.Errorf("ошибка в строке %d: неверный тираж", i+2)
@@ -585,9 +597,7 @@ func (db *Database) ImportFromExcel(filename string) (int, error) {
             Copies: int32(copies),
         }
 
-        // Пытаемся добавить книгу
         if err := db.AddBook(book); err != nil {
-            // Если книга с таким ID уже существует, обновляем её
             if err := db.UpdateBook(book); err != nil {
                 return importedCount, fmt.Errorf("ошибка обновления книги в строке %d: %v", i+2, err)
             }
